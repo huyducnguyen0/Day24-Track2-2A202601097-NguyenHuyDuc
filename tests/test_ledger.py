@@ -45,3 +45,13 @@ def test_every_entry_needs_a_non_empty_reason(clean_ledger):
     bad_entry["reason"] = ""
     ledger.append(bad_entry, clean_ledger)
     assert ledger.verify(clean_ledger) is False
+
+
+def test_verify_detects_tail_truncation(clean_ledger):
+    ledger.append(_entry("search_docs", "allow"), clean_ledger)
+    ledger.append(_entry("read_customer", "allow"), clean_ledger)
+
+    lines = clean_ledger.read_text(encoding="utf-8").splitlines()
+    clean_ledger.write_text(lines[0] + "\n", encoding="utf-8")
+
+    assert ledger.verify(clean_ledger) is False

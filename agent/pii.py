@@ -43,11 +43,34 @@ _EMAIL_RE = re.compile(
     r"(?<![\w.+-])[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+"
     r"@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+"
 )
+_ENTITY_PRIORITY = {
+    "EMAIL": 4,
+    "VN_BANK_ACCOUNT": 3,
+    "VN_CCCD": 2,
+    "VN_PHONE": 1,
+}
 
 
 def _entity(entity_type: str, match: re.Match[str], group: int = 0) -> dict:
     start, end = match.span(group)
     return {"type": entity_type, "start": start, "end": end}
+
+
+def _resolve_overlaps(entities: list[dict]) -> list[dict]:
+    ordered = sorted(
+        entities,
+        key=lambda e: (
+            e["start"],
+            -(e["end"] - e["start"]),
+            -_ENTITY_PRIORITY.get(e["type"], 0),
+        ),
+    )
+    selected: list[dict] = []
+    for entity in ordered:
+        if selected and entity["start"] < selected[-1]["end"]:
+            continue
+        selected.append(entity)
+    return selected
 
 
 def detect(text: str) -> list[dict]:
@@ -64,10 +87,11 @@ def detect(text: str) -> list[dict]:
     entities.extend(_entity("VN_BANK_ACCOUNT", m, 1) for m in _BANK_RE.finditer(text))
     entities.extend(_entity("EMAIL", m) for m in _EMAIL_RE.finditer(text))
 
-    # Stable ordering makes callers and redaction deterministic.  Remove any
-    # accidental duplicate while preserving the most specific span.
+    # Stable ordering makes callers and redaction deterministic.  Remove
+    # duplicate and overlapping matches; for equal spans, contextual bank
+    # account matches win over the generic 12-digit CCCD recognizer.
     unique = {(e["type"], e["start"], e["end"]): e for e in entities}
-    return sorted(unique.values(), key=lambda e: (e["start"], e["end"], e["type"]))
+    return _resolve_overlaps(list(unique.values()))
 
 
 def redact(text: str) -> str:

@@ -1,6 +1,7 @@
 """BƯỚC 3d — audit ledger append-only, tamper-evident (10').
 
-JSONL, mỗi tool call một dòng. Đọc Guide.md (§3d).
+JSONL, mỗi tool call một dòng. Đọc Guide.md (§3d). Một checkpoint sibling
+`<path>.head` lưu hash cuối để verify cũng phát hiện việc cắt mất dòng đuôi.
 
 Interface bắt buộc (tests/test_ledger.py và agent/runner.py gọi trực tiếp):
 
@@ -47,6 +48,10 @@ def _content_hash(entry: dict) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def _head_path(path: Path) -> Path:
+    return Path(f"{path}.head")
+
+
 def append(entry: dict, path: Path) -> dict:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -63,6 +68,7 @@ def append(entry: dict, path: Path) -> dict:
     recorded["hash"] = _content_hash(recorded)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(recorded, ensure_ascii=False, sort_keys=True) + "\n")
+    _head_path(path).write_text(recorded["hash"] + "\n", encoding="utf-8")
     return recorded
 
 
@@ -85,6 +91,13 @@ def verify(path: Path) -> bool:
             if not entry.get("hash") or entry["hash"] != _content_hash(entry):
                 return False
             expected_previous = entry["hash"]
+        if lines:
+            head_path = _head_path(path)
+            if not head_path.exists():
+                return False
+            anchored_head = head_path.read_text(encoding="utf-8").strip()
+            if anchored_head != expected_previous:
+                return False
     except (OSError, UnicodeError, json.JSONDecodeError, TypeError):
         return False
     return True

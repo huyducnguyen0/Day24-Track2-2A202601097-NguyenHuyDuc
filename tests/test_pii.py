@@ -66,3 +66,9 @@ def test_redact_removes_detected_entities():
     for entity in detected:
         original_value = text[entity["start"] : entity["end"]]
         assert original_value not in redacted, f"redact() vẫn còn lộ {original_value!r}"
+
+
+def test_redact_resolves_overlapping_bank_account_and_cccd_matches():
+    text = "STK: 123456789012"
+    redacted = pii.redact(text)
+    assert redacted == "STK: [REDACTED_VN_BANK_ACCOUNT]"
