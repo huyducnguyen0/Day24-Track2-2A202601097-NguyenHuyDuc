@@ -2,17 +2,29 @@
 
 ## 1. Dữ liệu gì
 
-<!-- Loại dữ liệu agent này chạm vào: tên, CCCD, SĐT, STK, email... liệt
-kê theo từng tool (search_docs / read_customer). -->
+`search_docs` đọc nội dung ticket không tin cậy, trong đó có thể chứa tên,
+CCCD, số điện thoại, STK và email. Nội dung được redact bằng PII gate trước
+khi đi vào LLM context. `read_customer` đọc hồ sơ private gồm
+`customer_id`, tên, CCCD, phone, bank account, email và `related_tickets`.
+Ledger chỉ lưu hash của arguments, không lưu nguyên PII.
 
 ## 2. Mục đích gì
 
-<!-- Vì sao agent cần đọc dữ liệu này để trả lời yêu cầu người dùng. -->
+Agent cần đọc ticket để tổng hợp yêu cầu hỗ trợ. Chỉ khi ticket ID đến từ
+filename và khớp `related_tickets` trong data store tin cậy, Run B mới đọc
+hồ sơ khách hàng để phục vụ đối soát. Nội dung tự do của ticket không được
+dùng để chọn `customer_id`.
 
 ## 3. Chảy đi đâu
 
-<!-- Toàn bộ nơi dữ liệu này có thể đi tới: log nội bộ, sink (trong lab),
-và — nếu dùng --model claude-... — cả API của model provider. Đây là
-chuyển dữ liệu xuyên biên giới theo NĐ 356/2025 nếu provider ở nước
-ngoài; ghi rõ có hay không, và agent có egress control nào chặn việc này
-khi không cần thiết. -->
+Luồng dữ liệu là `corpus/` → `search_docs` → PII redaction → LLM context;
+ticket ID dạng số đi qua boundary Run A → Run B → lookup `related_tickets` →
+`read_customer`. Hồ sơ private không được đưa vào `summarize` và không được
+POST ra sink khi policy deny. `http_post` chỉ được xem xét tại policy gate;
+với `restricted + egress_enabled`, request bị deny trước khi tool chạy.
+
+Khi dùng `--mock`, không có model provider bên ngoài; dữ liệu chỉ đi vào
+local context và ledger metadata. Khi dùng `--model`, ticket text có thể đi
+tới Anthropic API; nếu provider ở nước ngoài, đây là luồng xuyên biên giới
+cần đánh giá/lưu hồ sơ theo NĐ 356/2025. Egress control của runner vẫn chặn
+đường POST dữ liệu private không cần thiết tới sink.
