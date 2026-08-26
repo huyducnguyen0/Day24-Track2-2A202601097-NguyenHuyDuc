@@ -30,10 +30,50 @@ set ở tests/vn_pii_testset.jsonl):
 """
 from __future__ import annotations
 
+import re
+
+
+_CCCD_RE = re.compile(r"(?<!\d)\d{12}(?!\d)")
+_PHONE_RE = re.compile(r"(?<!\d)0(?:[\s.-]?\d){9,10}(?!\d)")
+_BANK_RE = re.compile(
+    r"(?:stk|số\s+tài\s+khoản)\s*[:#-]?\s*(\d{8,16})(?!\d)",
+    re.IGNORECASE,
+)
+_EMAIL_RE = re.compile(
+    r"(?<![\w.+-])[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+"
+    r"@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+"
+)
+
+
+def _entity(entity_type: str, match: re.Match[str], group: int = 0) -> dict:
+    start, end = match.span(group)
+    return {"type": entity_type, "start": start, "end": end}
+
 
 def detect(text: str) -> list[dict]:
-    raise NotImplementedError("BƯỚC 3a: implement PII detection")
+    entities: list[dict] = []
+
+    entities.extend(_entity("VN_CCCD", m) for m in _CCCD_RE.finditer(text))
+
+    for match in _PHONE_RE.finditer(text):
+        context = text[max(0, match.start() - 24) : match.start()].lower()
+        if re.search(r"(?:stk|tài\s+khoản)\s*$", context):
+            continue
+        entities.append(_entity("VN_PHONE", match))
+
+    entities.extend(_entity("VN_BANK_ACCOUNT", m, 1) for m in _BANK_RE.finditer(text))
+    entities.extend(_entity("EMAIL", m) for m in _EMAIL_RE.finditer(text))
+
+    # Stable ordering makes callers and redaction deterministic.  Remove any
+    # accidental duplicate while preserving the most specific span.
+    unique = {(e["type"], e["start"], e["end"]): e for e in entities}
+    return sorted(unique.values(), key=lambda e: (e["start"], e["end"], e["type"]))
 
 
 def redact(text: str) -> str:
-    raise NotImplementedError("BƯỚC 3a: implement PII redaction")
+    entities = sorted(detect(text), key=lambda e: (e["start"], e["end"]))
+    for entity in reversed(entities):
+        start, end = entity["start"], entity["end"]
+        replacement = f"[REDACTED_{entity['type']}]"
+        text = text[:start] + replacement + text[end:]
+    return text
